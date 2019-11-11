@@ -1,7 +1,7 @@
 ---
 title: "Item Analysis All Data"
 output: html_document
-author: Mrinalini Samanta (IBM)
+author: Mrinalini Samanta 
 date: 03/27/2019
 description: This document This document is used for the item analysis for the        
 district and SPG assessments. This document is meant to capture all information
