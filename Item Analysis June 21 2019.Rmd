@@ -1,6 +1,6 @@
 ---
 title: "Item Analysis All Data"
-output: html_document
+output: Excel Documents
 author: Mrinalini Samanta 
 date: 03/27/2019
 description: This document is meant to capture all information
