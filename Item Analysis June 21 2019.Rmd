@@ -1,0 +1,538 @@
+---
+title: "Item Analysis All Data"
+output: html_document
+author: Mrinalini Samanta (IBM)
+date: 03/27/2019
+description: This document This document is used for the item analysis for the        
+district and SPG assessments. This document is meant to capture all information
+exported in the item analysis reports for the research department. 
+This document calculates the answer ratio,point biserial distractor, p-value, 
+reliability, and point biserial for necessary assessment. This document now 
+allows the user to read in the data directly from the district as an SAV file 
+and can directly organize the exported item analysis reports by subject, school 
+level, and course number. 
+---
+
+Installing Relevant Packages for Item Analysis and Excel Output 
+```{r setup, include=FALSE}
+##install.packages("CTT")
+library(CTT)
+##install.packages("xlsx") 
+library(xlsx)
+##install.packages("haven")
+library(haven)
+#used for data cleaning of test type column 
+library(stringr)
+#installing janitor for removing empty columns in dfs
+library(janitor)
+
+### PACKAGES FOR FORMATTING THE ITEM ANALYSIS EXPORTS ###
+#install.packages("data.table")
+library(data.table)
+#install.packages("dplyr")
+library(dplyr)
+#install.packages("formattable")
+library(formattable)
+#install.packages("tidyr")
+library(tidyr)
+```
+
+
+Reading the Data
+```{r}
+#set working directory
+setwd("~/Desktop/Mrinalini/Projects/GCPS/Item Analysis")
+
+#read in data file 
+MyData <- read_sav(file="06-10-2019 End of Year Tests (MS-HS) SAFE.sav")
+
+```
+
+Splitting the Files
+```{r}
+#split on test type (DA vs. SPG)
+SPG.Tests=MyData[-which(MyData$TEST_TYPE=="District Assessment Final"),]
+DA.Tests=MyData[which(MyData$TEST_TYPE=="District Assessment Final"),]
+#had to redo the classification for '2019 second sem interim' based on "District Assessment" because of there only being DA's
+
+```
+
+Final Folder Splits
+```{r}
+#splitting DA by subject 
+#splitting by course type as well 
+ 
+da.list <- list()
+dept.da.list <- unique(DA.Tests$DEPT)
+for (i in 1: length(dept.da.list)){
+  DA.names <- paste("DA", dept.da.list[i], sep = ".") 
+  first.split <- assign(DA.names, DA.Tests[which(DA.Tests$DEPT==dept.da.list[i]),])
+  second.split <- split(first.split, first.split$Course)
+  second.split <- assign(DA.names, second.split)
+  da.list[[i]] <- second.split
+}
+
+#splitting SPG by subject 
+#splitting by course type as well 
+
+if(nrow(SPG.Tests)!=0){
+  spg.list <- list()
+  dept.spg.list <- unique(SPG.Tests$DEPT)
+  for (i in 1: length(dept.spg.list)){
+    SPG.names <- paste("SPG", dept.spg.list[i], sep = ".") 
+    first.split <- assign(SPG.names, SPG.Tests[which(SPG.Tests$DEPT==dept.spg.list[i]),])
+    second.split <- split(first.split, first.split$Course)
+    second.split <- assign(DA.names, second.split)
+    spg.list[[i]] <- second.split
+  }
+}
+
+```
+
+
+Item Analysis and Excel Output Function
+```{r}
+excel.output <- function (folder){
+  
+  
+  test.names<-folder #changing the folder to test names 
+  quant.test<-length(test.names)
+  
+  #Indicator function to be used in sorting
+  indicator<-function(statement)
+  {
+    if (statement==TRUE)
+    {return(1)} 
+    else
+    {return (0)}
+  }
+  
+  ## BEGIN FOR LOOP
+  ## --------------
+  #just for this one math exam...
+  for (j in (1:quant.test))
+  {
+    ############################################################################################
+    #excel naming convention 
+    
+    
+    #grade HS, MS, or ES
+    if (test.names[[j]]$GRD[[1]]>=9 & test.names[[j]]$GRD[[1]]<=12) {
+        grade="HS"
+        }else if (test.names[[j]]$GRD[[1]]>=6 &test.names[[j]]$GRD[[1]]<=8) {
+        grade="MS"
+        }else {
+        grade="ES"
+    }
+    
+        
+    #test_type name
+    if (test.names[[j]]$TEST_TYPE[[1]]=="SPG Post Test") {
+        test="SPG"
+        }else {
+        test="DA"
+      }
+        
+    #subject
+    subject= test.names[[j]]$DEPT[[1]]
+       
+    
+    current.folder= paste(grade, subject, test, sep = "_")
+    
+    
+    ############################################################################################
+
+ 
+    #Extract all file names from desired directory
+    ExcelName<-paste("/Users/mrinalinisamanta/Desktop/",current.folder, ".xlsx", sep = "", collapse = "")
+  
+    
+    
+    ## Read spss file
+    test.file<-test.names[[j]]
+    
+    #print(test.file)
+    test.file<-as.matrix(test.file)
+    test.file[test.file==""]<-NA
+    test.file<-as.data.frame(test.file)
+   
+    
+    ## Load answers, results, and scores into dataframe
+    ##find location of first question
+    firstQ<-which(colnames(test.file)=="Q1")
+    
+    ##find location of first NA in questions
+    NAindexq<-which(is.na(test.file[1,-(1:firstQ-1)]))
+    firstNAq<-min(NAindexq)
+    
+    #Compile answers in data frame
+    answers <- data.frame(test.file[,(firstQ):(firstQ+firstNAq-2)], stringsAsFactors = FALSE)
+  
+    ##find location of first result
+    firstP<-which(colnames(test.file)=="P1")
+    
+    #Compile results in data frame
+    results <- data.frame(test.file[,(firstP):(firstP+firstNAq-2)])
+   
+    scores <- data.frame(test.file$Correct)
+    
+    if((nrow(answers)>29)&(ncol(answers)>4))
+    {
+      nv<-0
+      
+      ## Create table to save data for answer ratio
+      if ("No Response" %in% (unique(as.vector(t(answers)))))
+      {
+        nv<-1
+      }
+      answer_ratio_table<-matrix(0,nrow=(ncol(answers)),ncol=(length(unique(as.vector(t(answers))))+1-nv)) 
+      colnames(answer_ratio_table)<-c(LETTERS[1:(ncol(answer_ratio_table)-1)],"No Response")
+      
+      ## Count and find ratio of choices per question
+      for (i in (1:(ncol(answers))))
+      {
+        for (k in (1:ncol(answer_ratio_table)))
+        {  
+          count.answer<-colnames(answer_ratio_table)[k]
+          
+          #adjusting so that the percentages are displayed and rounded to whole numbers 
+          answer_ratio_table[i,k]<-paste(round(100*sum(answers[,i]==count.answer, na.rm = TRUE)/(nrow(scores)),0), "%", sep = "")
+          
+        }
+      }
+      
+      ## Create vector to hold answer key
+      key <- integer(ncol(answers))
+      
+      ## Generate answer key
+      for (i in (1:(ncol(answers))))
+      {
+        q_answer <- cbind(as.vector(answers[,i]),as.vector(results[,i]))
+        q_answer <- q_answer[!(q_answer[,2])==0,]
+        #change this to string as factor = false 
+        key[i] <- as.matrix(q_answer)[1]
+      }
+      
+      ## Create table to save data for distractor analysis
+      #point_distractor_table<-matrix(0,nrow=(ncol(answers)),ncol=((ncol(answer_ratio_table))-1)) 
+      point_distractor_table<-matrix(0,nrow=(length(which(complete.cases(key)==TRUE))),ncol=((ncol(answer_ratio_table))-1))
+      colnames(point_distractor_table)<-c(LETTERS[1:(ncol(point_distractor_table))])
+      
+      for (i in (1:(ncol(point_distractor_table))))
+      {
+        colnames(point_distractor_table)[i]<-paste("Pt Biserial Distractor", LETTERS[i])      
+      }
+      
+      #removing unscored items from the key and answers for distractor analysis function
+      ifelse(length(which(is.na(key)))==0, filt.answers<-answers, filt.answers<-answers[, -which(is.na(key))])
+      filt.key<-key[complete.cases(key)]
+      
+      output<-CTT::distractorAnalysis(filt.answers, filt.key)
+      
+      
+      ## Copy data from distractorAnalysis in to table
+    
+      for (i in (1:ncol(filt.answers)))
+      { 
+        for (k in (1:((ncol(point_distractor_table)))))
+        {
+          qanswer<-as.vector(filt.answers[,i])
+          qanswer[qanswer==LETTERS[k]]<-1
+          #adding zeros as place holders
+          qanswer[qanswer!=1]<-0
+           
+          #sorting the output by the answer key so the point biserials correspond to the correct answer choices
+          output[[i]]<-output[[i]][order(output[[i]]$key, decreasing = F), , drop=FALSE]
+          
+          #added a dynamic number of columns to replace for the point distractor table if the output table contains "No Response" row or not
+          ifelse("No Response"%in%rownames(output[[i]]),point_distractor_table[i,]<-format(round(as.numeric(as.vector(output[[i]]$pBis[-nrow(output[[i]])])),3), nsmall = 3),point_distractor_table[i,]<-format(round(as.numeric(as.vector(output[[i]]$pBis)),3), nsmall = 3))
+        }
+      }
+      
+      #unnecessary step now
+      point_distractor_table[is.na(point_distractor_table)]<-(-9999)
+   
+  
+      ##Create matrix to save info and extract it from item analysis
+      reliability_table<-matrix(0,nrow=(ncol(filt.answers)),ncol=3)
+   
+      #creating a filtered results table (if items were removed from scoring) to extract item analysis info from
+      ifelse(length(which(is.na(key)))==0, filt.results<-results ,filt.results<-results[, -which(is.na(key))])
+      
+      ##Run item analysis for p-value, point biserial and reliability
+      ##Create matrix to save info and extract it from item analysis
+      item_analysis<-itemAnalysis(filt.results)
+      analysis_report<-item_analysis$itemReport
+      
+
+      #rounding to the correct number of digits
+      reliability_table[,1]<-format(round(analysis_report$itemMean, digits = 2), nsmall = 2)
+      reliability_table[,2]<-format(round(analysis_report$pBis, digits = 3), nsmall = 3)
+      reliability_table[,3]<-format(round(analysis_report$alphaIfDeleted, digits = 3), nsmall = 3)
+      colnames(reliability_table)<-c("P Value", "Point Biserial","Reliability if Item Deleted")
+      
+      
+      ##Compile all data in one table
+      Item_Position<-seq(1:(ncol(answers)))
+      #removing item positions for items that were removed from scoring 
+      Item_Position<-Item_Position[!Item_Position%in%which(is.na(key))]
+      #creating a filtered answer ratio table if items were removed from scoring 
+      ifelse(length(which(is.na(key)))==0,filt.answer_ratio_table<-answer_ratio_table,filt.answer_ratio_table<-answer_ratio_table[-which(is.na(key)),])
+    
+      display_table<-cbind(Item_Position,filt.answer_ratio_table,reliability_table,point_distractor_table,filt.key)
+      
+      colnames(display_table)[1]<-"Item Position"
+      colnames(display_table)[ncol(display_table)]<-"Answer Key"
+      
+      ##Create auxiliary table for sorting
+      flag.check<-matrix(0,nrow=nrow(display_table),ncol=(1+ncol(answer_ratio_table)))
+      
+      for (i  in (1:(nrow(display_table))))
+      {
+        flag.check[i,1]<-indicator(is.na(display_table[i,((ncol(answer_ratio_table))+2)])|(as.numeric(display_table[i,((ncol(answer_ratio_table))+2)])>0.95)|(as.numeric(display_table[i,((ncol(answer_ratio_table))+2)])<0.2)) #p-value
+        flag.check[i,2]<-(indicator(is.na(as.numeric(display_table[i,((ncol(answer_ratio_table))+3)]))|as.numeric(display_table[i,((ncol(answer_ratio_table))+3)])<0.2)+indicator(is.na(display_table[i,((ncol(answer_ratio_table))+3)][2])|as.numeric(display_table[i,((ncol(answer_ratio_table))+3)])<0)) #point biserial 
+        
+        for (k in (1:((ncol(answer_ratio_table))-1)))
+        {
+          flag.check[i,(k+2)]<-indicator(grepl("NA",display_table[i,((ncol(answer_ratio_table))+4+k)])|is.na(display_table[i,(ncol(display_table))])|((ifelse(grepl("NA",display_table[i,((ncol(answer_ratio_table)+4)+k)]),FALSE, as.numeric(display_table[i,((ncol(answer_ratio_table)+4)+k)])>0)) & (display_table[i,(ncol(display_table))]!=LETTERS[k])))
+        }
+        
+      }
+      
+      sorting.table<-cbind(display_table,flag.check)
+      
+      
+      for (i in (1:(ncol(flag.check))))
+      {
+        sorting.table<-sorting.table[order(sorting.table[,((ncol(sorting.table))-i+1)],decreasing = TRUE),]
+      }
+      
+      display_table<-sorting.table[,(1:(ncol(display_table)))]
+      
+      n.examinees<-nrow(answers)
+      n.items<-nrow(display_table)
+      reliability.test<-round(item_analysis$alpha,4)
+      
+      #included section for which items were removed from scoring in subheader
+      ifelse(length(which(is.na(key)))==0,subheader<-paste("N Examinees =",n.examinees,"   N Items =",n.items,"   Reliability =",reliability.test),subheader<-paste("N Examinees =",n.examinees,"   N Items =",n.items,"   Reliability =",reliability.test,"  Items Removed From Scoring =",paste(which(is.na(key)), collapse = ', ')))
+      
+      header<-paste(test.names[[j]][1,3],"   " ,subheader)
+      
+      #Save header in Top Left Corner of table
+      display_table<-rbind(integer(ncol(display_table)),display_table)
+      
+      display_table[1,1]<-header
+      
+      display_table[display_table==-9999]<-"."
+      
+      #remove the column for "No Response"
+      #nr.col = which(names(display_table[1,])=="No Response")
+      #display_table<- display_table[,-nr.col]
+      
+      #removing the extra pBi
+      #display_table<- display_table[,-(ncol(display_table)-1)]
+      
+      #name of each sheet - denoted by course code 
+      namedsheet=paste(j, ")", as.character(test.names[[j]]$course_code[[1]])) 
+      write.xlsx(x = display_table, file = ExcelName, sheetName = namedsheet, row.names = FALSE, append = TRUE) 
+      
+    }
+  }
+}
+```
+
+Running of excel output function on lists of "folders" 
+```{r}
+
+#running item analysis output on each set of exams for DA
+for (i in 1:length(da.list)){
+  excel.output(da.list[[i]])
+}
+
+#running item analysis output on each set of exams for SPG
+for (i in 1:length(spg.list)){
+  excel.output(spg.list[[i]])
+}
+```
+
+Troubleshooting Code
+```{r}
+
+folder=spg.list[[]]
+j=
+
+ExcelName=folder[[j]]$Course[[1]]
+
+indicator<-function(statement)
+{
+  if (statement==TRUE)
+  {return(1)} 
+  else
+  {return (0)}
+}
+
+test.names<-folder #changing the folder to test names 
+quant.test<-length(test.names)
+
+test.file<-test.names[[j]]
+    
+#print(test.file)
+test.file<-as.matrix(test.file)
+test.file[test.file==""]<-NA
+test.file<-as.data.frame(test.file)
+   
+    
+## Load answers, results, and scores into dataframe
+##find location of first question
+firstQ<-which(colnames(test.file)=="Q1")
+
+##find location of first NA in questions
+NAindexq<-which(is.na(test.file[1,-(1:firstQ-1)]))
+firstNAq<-min(NAindexq)
+
+#Compile answers in data frame
+answers <- data.frame(test.file[,(firstQ):(firstQ+firstNAq-2)], stringsAsFactors = FALSE)
+
+##find location of first result
+firstP<-which(colnames(test.file)=="P1")
+
+#Compile results in data frame
+results <- data.frame(test.file[,(firstP):(firstP+firstNAq-2)])
+
+scores <- data.frame(test.file$Correct)
+
+nv<-0
+      
+## Create table to save data for answer ratio
+if ("No Response" %in% (unique(as.vector(t(answers)))))
+{
+  nv<-1
+}
+
+answer_ratio_table<-matrix(0,nrow=(ncol(answers)),ncol=(length(unique(as.vector(t(answers))))+1-nv)) 
+colnames(answer_ratio_table)<-c(LETTERS[1:(ncol(answer_ratio_table)-1)],"No Response")
+
+## Count and find ratio of choices per question
+for (i in (1:(ncol(answers))))
+{
+  for (k in (1:ncol(answer_ratio_table)))
+  {  
+    count.answer<-colnames(answer_ratio_table)[k]
+    
+    #adjusting so that the percentages are displayed and rounded to whole numbers 
+    answer_ratio_table[i,k]<-paste(round(100*sum(answers[,i]==count.answer, na.rm = TRUE)/(nrow(scores)),0), "%", sep = "")
+    
+  }
+}
+
+## Create vector to hold answer key
+key <- integer(ncol(answers))
+
+## Generate answer key
+for (i in (1:(ncol(answers))))
+{
+  q_answer <- cbind(as.vector(answers[,i]),as.vector(results[,i]))
+  q_answer <- q_answer[!(q_answer[,2])==0,]
+  #change this to string as factor = false 
+  key[i] <- as.matrix(q_answer)[1]
+}
+
+## Create table to save data for distractor analysis
+#point_distractor_table<-matrix(0,nrow=(ncol(answers)),ncol=((ncol(answer_ratio_table))-1)) 
+point_distractor_table<-matrix(0,nrow=(length(which(complete.cases(key)==TRUE))),ncol=((ncol(answer_ratio_table))-1))
+colnames(point_distractor_table)<-c(LETTERS[1:(ncol(point_distractor_table))])
+
+for (i in (1:(ncol(point_distractor_table))))
+{
+  colnames(point_distractor_table)[i]<-paste("Pt Biserial Distractor", LETTERS[i])      
+}
+
+#removing unscored items from the key and answers for distractor analysis function
+ifelse(length(which(is.na(key)))==0, filt.answers<-answers, filt.answers<-answers[, -which(is.na(key))])
+filt.key<-key[complete.cases(key)]
+
+output<-0
+      
+#unnecessary step now
+point_distractor_table[is.na(point_distractor_table)]<-(-9999)
+
+
+##Create matrix to save info and extract it from item analysis
+reliability_table<-matrix(0,nrow=(ncol(filt.answers)),ncol=3)
+
+#creating a filtered results table (if items were removed from scoring) to extract item analysis info from
+ifelse(length(which(is.na(key)))==0, filt.results<-results ,filt.results<-results[, -which(is.na(key))])
+
+##Run item analysis for p-value, point biserial and reliability
+##Create matrix to save info and extract it from item analysis
+item_analysis<-itemAnalysis(filt.results)
+analysis_report<-item_analysis$itemReport
+
+
+#rounding to the correct number of digits
+reliability_table[,1]<-format(round(analysis_report$itemMean, digits = 2), nsmall = 2)
+reliability_table[,2]<-format(round(analysis_report$pBis, digits = 3), nsmall = 3)
+reliability_table[,3]<-format(round(analysis_report$alphaIfDeleted, digits = 3), nsmall = 3)
+colnames(reliability_table)<-c("P Value", "Point Biserial","Reliability if Item Deleted")
+
+
+##Compile all data in one table
+Item_Position<-seq(1:(ncol(answers)))
+#removing item positions for items that were removed from scoring 
+Item_Position<-Item_Position[!Item_Position%in%which(is.na(key))]
+#creating a filtered answer ratio table if items were removed from scoring 
+ifelse(length(which(is.na(key)))==0,filt.answer_ratio_table<-answer_ratio_table,filt.answer_ratio_table<-answer_ratio_table[-which(is.na(key)),])
+
+display_table<-cbind(Item_Position,filt.answer_ratio_table,reliability_table,point_distractor_table,filt.key)
+
+colnames(display_table)[1]<-"Item Position"
+colnames(display_table)[ncol(display_table)]<-"Answer Key"
+
+##Create auxiliary table for sorting
+flag.check<-matrix(0,nrow=nrow(display_table),ncol=(1+ncol(answer_ratio_table)))
+
+for (i  in (1:(nrow(display_table))))
+{
+  flag.check[i,1]<-indicator(is.na(display_table[i,((ncol(answer_ratio_table))+2)])|(as.numeric(display_table[i,((ncol(answer_ratio_table))+2)])>0.95)|(as.numeric(display_table[i,((ncol(answer_ratio_table))+2)])<0.2)) #p-value
+  flag.check[i,2]<-(indicator(is.na(as.numeric(display_table[i,((ncol(answer_ratio_table))+3)]))|as.numeric(display_table[i,((ncol(answer_ratio_table))+3)])<0.2)+indicator(is.na(display_table[i,((ncol(answer_ratio_table))+3)][2])|as.numeric(display_table[i,((ncol(answer_ratio_table))+3)])<0)) #point biserial 
+  
+  for (k in (1:((ncol(answer_ratio_table))-1)))
+  {
+    flag.check[i,(k+2)]<-indicator(grepl("NA",display_table[i,((ncol(answer_ratio_table))+4+k)])|is.na(display_table[i,(ncol(display_table))])|((ifelse(grepl("NA",display_table[i,((ncol(answer_ratio_table)+4)+k)]),FALSE, as.numeric(display_table[i,((ncol(answer_ratio_table)+4)+k)])>0)) & (display_table[i,(ncol(display_table))]!=LETTERS[k])))
+  }
+  
+}
+
+sorting.table<-cbind(display_table,flag.check)
+
+
+for (i in (1:(ncol(flag.check))))
+{
+  sorting.table<-sorting.table[order(sorting.table[,((ncol(sorting.table))-i+1)],decreasing = TRUE),]
+}
+
+display_table<-sorting.table[,(1:(ncol(display_table)))]
+
+n.examinees<-nrow(answers)
+n.items<-nrow(display_table)
+reliability.test<-round(item_analysis$alpha,4)
+
+#included section for which items were removed from scoring in subheader
+ifelse(length(which(is.na(key)))==0,subheader<-paste("N Examinees =",n.examinees,"   N Items =",n.items,"   Reliability =",reliability.test),subheader<-paste("N Examinees =",n.examinees,"   N Items =",n.items,"   Reliability =",reliability.test,"  Items Removed From Scoring =",paste(which(is.na(key)), collapse = ', ')))
+
+header<-paste(test.names[[j]][1,3],"   " ,subheader)
+
+#Save header in Top Left Corner of table
+display_table<-rbind(integer(ncol(display_table)),display_table)
+
+display_table[1,1]<-header
+
+display_table[display_table==-9999]<-"."
+
+name=sub('.*,\\s*', '', ExcelName)
+
+#name of each sheet - denoted by course code 
+write.xlsx(display_table, file = paste(name, "xlsx", sep = "."), row.names = FALSE)
+```
+
+
