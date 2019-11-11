@@ -3,8 +3,7 @@ title: "Item Analysis All Data"
 output: html_document
 author: Mrinalini Samanta 
 date: 03/27/2019
-description: This document This document is used for the item analysis for the        
-district and SPG assessments. This document is meant to capture all information
+description: This document is meant to capture all information
 exported in the item analysis reports for the research department. 
 This document calculates the answer ratio,point biserial distractor, p-value, 
 reliability, and point biserial for necessary assessment. This document now 
