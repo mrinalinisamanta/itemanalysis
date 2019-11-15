@@ -247,9 +247,6 @@ excel.output <- function (folder){
           ifelse("No Response"%in%rownames(output[[i]]),point_distractor_table[i,]<-format(round(as.numeric(as.vector(output[[i]]$pBis[-nrow(output[[i]])])),3), nsmall = 3),point_distractor_table[i,]<-format(round(as.numeric(as.vector(output[[i]]$pBis)),3), nsmall = 3))
         }
       }
-      
-      #unnecessary step now
-      point_distractor_table[is.na(point_distractor_table)]<-(-9999)
    
   
       ##Create matrix to save info and extract it from item analysis
