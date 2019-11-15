@@ -319,14 +319,9 @@ excel.output <- function (folder){
       
       display_table[1,1]<-header
       
-      display_table[display_table==-9999]<-"."
-      
       #remove the column for "No Response"
       #nr.col = which(names(display_table[1,])=="No Response")
       #display_table<- display_table[,-nr.col]
-      
-      #removing the extra pBi
-      #display_table<- display_table[,-(ncol(display_table)-1)]
       
       #name of each sheet - denoted by course code 
       namedsheet=paste(j, ")", as.character(test.names[[j]]$course_code[[1]])) 
