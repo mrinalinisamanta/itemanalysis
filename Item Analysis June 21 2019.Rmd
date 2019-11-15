@@ -150,7 +150,7 @@ excel.output <- function (folder){
     ## Read spss file
     test.file<-test.names[[j]]
     
-    #print(test.file)
+ 
     test.file<-as.matrix(test.file)
     test.file[test.file==""]<-NA
     test.file<-as.data.frame(test.file)
