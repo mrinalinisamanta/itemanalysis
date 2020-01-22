@@ -1,0 +1,533 @@
+---
+title: "DevUp 2019"
+author: "Mrinalini Samanta"
+date: "4/16/2019"
+output: html_document
+---
+Loading Libraries
+```{r setup, include=FALSE}
+
+library(haven)
+
+#used for data cleaning of test type column 
+library(stringr)
+
+#installing janitor for removing empty columns in dfs
+library(janitor)
+
+#install.packages("tidyr")
+#install.packages("caret")
+library(tidyr)
+
+#installing these libraries for data table creation
+library(knitr)
+library(DT)
+library(xtable)
+library(data.table)
+
+#installing geosphere library for distance calculations
+library(geosphere)
+library(plyr)
+library(dplyr)
+
+#for linear model
+library(MASS)
+library(caret)
+library(DAAG)
+library(tidyverse)
+library(leaps)
+```
+
+Reading in and cleaning the bike data.
+```{r cars}
+#setting the working directory
+setwd("~/Desktop/DevUp 2019")
+
+#importing data and naming dataframes 
+q1 <- read.csv("Divvy_Trips_2017_Q1.csv")
+q2 <- read.csv("Divvy_Trips_2017_Q2.csv")
+q3 <- read.csv("Divvy_Trips_2017_Q3.csv")
+q4 <- read.csv("Divvy_Trips_2017_Q4.csv")
+sem1 <- read.csv("Divvy_Stations_2017_Q1Q2.csv")
+sem2 <- read.csv("Divvy_Stations_2017_Q3Q4.csv")
+
+#merging all quarter dfs by semester to match with the meta data sets 
+data2017.sem1 <- bind_rows(q1, q2)
+data2017.sem2 <- bind_rows(q3, q4)
+
+#removing duplicate entries 
+data2017.sem1 <- distinct(data2017.sem1)
+data2017.sem2 <- distinct(data2017.sem2)
+sem1 <- distinct(sem1)
+sem2 <- distinct(sem2)
+
+#merging the first meta data to data2017.sem1 for to station lat and lon
+data2017.sem1 <- merge(x=data2017.sem1, y=sem1, by.x = "to_station_id", by.y = "id", all.x=TRUE)
+#renaming latitude and longitude columns
+setnames(data2017.sem1, old = c("longitude", "latitude"), new = c("End Longitude", "End Latitude"))
+
+
+#merging the second meta data to data2017.sem2 for to station lat and lon
+data2017.sem2 <- merge(x=data2017.sem2, y=sem2, by.x = "to_station_id", by.y = "id", all.x=TRUE)
+#renaming latitude and longitude columns
+setnames(data2017.sem2, old = c("longitude", "latitude"), new = c("End Longitude", "End Latitude"))
+
+
+#merging the first meta data to data2017.sem1 for from station lat and lon
+data2017.sem1 <- merge(x=data2017.sem1, y=sem1, by.x = "from_station_id", by.y = "id", all.x=TRUE)
+#renaming latitude and longitude columns
+setnames(data2017.sem1, old = c("longitude", "latitude"), new = c("Start Longitude", "Start Latitude"))
+
+
+#merging the second meta data to data2017.sem2 for from station lat and lon
+data2017.sem2 <- merge(x=data2017.sem2, y=sem2, by.x = "from_station_id", by.y = "id", all.x=TRUE)
+#renaming latitude and longitude columns
+setnames(data2017.sem2, old = c("longitude", "latitude"), new = c("Start Longitude", "Start Latitude"))
+
+#removing null value columns from data2017.sem2
+data2017.sem2 <- data2017.sem2[, -which(names(data2017.sem2) %in% c("X.x", "X.y"))]
+
+#combining data2017.sem1 and data2017.sem2 for full year data set
+data2017 <- bind_rows(data2017.sem1, data2017.sem2)
+
+#removing the original q1-q4 dataframes and metadata variables from workspace to help with processing time and memory space
+rm(q1, q2, q3, q4, sem1, sem2, data2017.sem1, data2017.sem2)
+```
+
+Calculating the number of starts per station.
+#2a
+```{r}
+#sorting and selecting top 5 starting stations based on frequency using the table function
+Location.Freq <- head(sort(table(data2017$from_station_name), decreasing = TRUE), n=5)
+#sorting and selecting top 5 starting stations IDs based on frequency using the table function
+ID.Freq <- head(sort(table(data2017$from_station_id), decreasing = TRUE), n=5)
+
+#combining ID, Station Name, and Number of Trips 
+popular.start.table<-cbind(names(ID.Freq),names(Location.Freq), Location.Freq)
+
+#Creating Output to Document Top 5 Starting Locations with relevant information 
+kable(popular.start.table, col.names = c("Station ID", "Station Name", "Number of Trips"), row.names = FALSE)
+par(mar=c(7,8, 3, 8))
+barplot(Location.Freq, col = "darkblue", ylab = "Number of Visits", main = "Number of Visits for the 5 Most Popular Stations", las=2, cex.axis = .7, font.axis =2, cex.names = 0.5, ylim = c(0,100000))
+```
+
+Calculatiing trip duration by user type.
+#2b
+```{r}
+
+#calculating the duration of each trip in minutes 
+#adding duration calculations for each unique trip in the dataframe 
+data2017$DurationMins <- data2017$tripduration/60
+data2017$DurationHrs <- data2017$DurationMins/60
+
+#splitting the dataframe on user type
+usertype.list <- split(data2017, data2017$usertype)
+customer <- usertype.list[["Customer"]]
+dependent <- usertype.list[["Dependent"]]
+subscriber <- usertype.list[["Subscriber"]]
+
+usertype <- c("Subscriber", "Customer", "Dependent")
+trips <- c(nrow(subscriber), nrow(customer), nrow(dependent))
+#creating a vector and calculating the total hours
+totalhrs <- c(sum(subscriber$DurationHrs),sum(customer$DurationHrs),sum(dependent$DurationHrs)) 
+#creating a vector of avg trip duration in minutes
+avg.mins <- c(mean(subscriber$DurationMins),mean(customer$DurationMins),mean(dependent$DurationMins))
+#creating a vector of median trip duration minutes 
+med.mins <- c(median(subscriber$DurationMins),median(customer$DurationMins),median(dependent$DurationMins))
+
+#Creating a dataframe of key stats calculated 
+#rounded the output of durations to the tenth's place 
+trip.duration.type.table <- cbind(usertype,trips,round(totalhrs, digits = 1), round(avg.mins, digits = 1), round(med.mins, digits = 1))
+
+kable(trip.duration.type.table, col.names = c("User Type", "Trips", "Total Hours", "Average Mins.", "Median Mins."))
+
+#creating bar chart of total hours ridden by user type
+barplot(totalhrs,names.arg=usertype,xlab="User Type",ylab="Total Number of Hours",col="blue",main="Total Number of Hours Ridden by User Type", ylim = c(0,700000), font.axis=2)
+
+
+#to improve memory space, removing large objects 
+rm(usertype.list, customer, dependent, subscriber)
+```
+
+Calculating most popoular trips taken. 
+#2c
+```{r}
+#calculating the frequency of trips between starting station and ending station 
+pop.trips <- ddply(data2017, .(data2017$from_station_name, data2017$to_station_name), nrow)
+
+#creating a table to display the most popular trips 
+kable(head(pop.trips[order(pop.trips$V1, decreasing = TRUE),], n=5), row.names = FALSE,col.names = c("Start Station", "End Station", "Number of Trips"))
+
+par(mar=c(9,8, 3, 8))
+barplot(head(pop.trips[order(pop.trips$V1, decreasing = TRUE),], n=5)$V1, names.arg = paste(head(pop.trips[order(pop.trips$V1, decreasing = TRUE),], n=5)$`data2017$from_station_name`, "to", head(pop.trips[order(pop.trips$V1, decreasing = TRUE),], n=5)$`data2017$to_station_name`, sep = "\n"), las=2, col = "darkblue", cex.names = .7, ylab = "Number of Trips", main = "Top 5 Popular Trips Taken", cex.axis = 0.6, ylim = c(0,15000))
+
+#to improve memory space, removing large objects 
+rm(pop.trips)
+```
+
+
+Evaluating rider performance by gender and age. 
+#2d
+```{r}
+#adding an age column 
+Age <- 2019 - data2017$birthyear
+data2017$Age <- Age
+
+
+#adding distance calculations 
+#calculating the distance between starting point and ending point in meters
+data2017<-mutate(data2017, Distance = distHaversine(cbind(data2017$`Start Longitude`, data2017$`Start Latitude`), cbind(data2017$`End Longitude`, data2017$`End Latitude`)))
+
+#converting distance to miles
+data2017$Distance <- data2017$Distance*0.00062137
+
+#since some trips are taken to and from the same station, we have no way of calculating the actual distance of the trip
+#thus, we will assume that all trips are taken to and from different stations as a condition for our model, and for 
+#the following calculations we will remove the distances that are equal to 0.
+
+data2017<-data2017[-which(data2017$Distance==0),]
+
+#calculating speed
+data2017$Speed <- data2017$Distance/data2017$DurationHrs
+
+#factoring age groups 
+data2017$AgeGroup <- NA
+data2017[which(data2017$Age>=17 & data2017$Age<25), "AgeGroup"] <- 1
+data2017[which(data2017$Age>=25 & data2017$Age<35), "AgeGroup"] <- 2
+data2017[which(data2017$Age>=35 & data2017$Age<45), "AgeGroup"] <- 3
+data2017[which(data2017$Age>=45 & data2017$Age<55), "AgeGroup"] <- 4
+data2017[which(data2017$Age>=55 & data2017$Age<65), "AgeGroup"] <- 5
+data2017[which(data2017$Age>=65 & data2017$Age<=70), "AgeGroup"] <- 6
+
+#splitting on gender, and then on age group to compute median speed and avg trip distance 
+gender.list <- split(data2017, data2017$gender)
+#removing NA dataframe from list
+gender.list[[1]] <- NULL
+
+#splitting on age group 
+fem.age.group<-split(gender.list[["Female"]], gender.list[["Female"]]$AgeGroup)
+mal.age.group<-split(gender.list[["Male"]], gender.list[["Male"]]$AgeGroup)
+
+#calculating median speed and average trip distance per age group
+median.speed.male <- lapply(mal.age.group, function(x){median(x$Speed)})
+median.speed.female <- lapply(fem.age.group, function(x){median(x$Speed)})
+avg.trip.dist.male <- lapply(mal.age.group, function(x){mean(x$Distance)})
+avg.trip.dist.female <- lapply(fem.age.group, function(x){mean(x$Distance)})
+
+
+#creating table output for female stats
+female.stats <- as.data.frame(cbind(c("17-25", "25-35", "35-45", "45-55", "55-65", "65-70"), median.speed.female, avg.trip.dist.female))
+#rounding the digits 
+female.stats$median.speed.female <- lapply(female.stats[,2],function(x){round(x, digits = 2)})
+female.stats$avg.trip.dist.female<- lapply(female.stats[,3],function(x){round(x, digits = 2)})
+colnames(female.stats) <- c("Age Group", "Median Speed", "Average Trip Distance")
+
+kable(female.stats, row.names = FALSE, caption = "Female Stats")
+
+
+#creating table output for female stats for male stats 
+male.stats <- as.data.frame(cbind(c("17-25", "25-35", "35-45", "45-55", "55-65", "65-70"), median.speed.male, avg.trip.dist.male))
+#rounding the digits 
+male.stats$median.speed.male <- lapply(male.stats[,2],function(x){round(x, digits = 2)})
+male.stats$avg.trip.dist.male<- lapply(male.stats[,3],function(x){round(x, digits = 2)})
+colnames(male.stats) <- c("Age Group", "Median Speed", "Average Trip Distance")
+
+kable(male.stats, row.names = FALSE, caption = "Male Stats")
+
+
+#making paired bar plots of median speed 
+speed.both <- t(as.matrix(cbind(as.numeric(female.stats$`Median Speed`), as.numeric(male.stats$`Median Speed`))))
+colnames(speed.both) <- c("17-25", "25-35", "35-45", "45-55", "55-65", "65-70")
+row.names(speed.both) <- c("Female", "Male")
+
+barplot(speed.both, main="Median Speed of Males and Females by Age Group", ylab = "Speed (Miles per Hour)", beside =TRUE, col = c("magenta", "blue"), legend=TRUE, xlim = c(0,25), xlab = "Age Group", ylim = c(0,7))
+
+
+#making paired bar plots of average trip distance 
+distance.both <- t(as.matrix(cbind(as.numeric(female.stats$`Average Trip Distance`), as.numeric(male.stats$`Average Trip Distance`))))
+colnames(distance.both) <- c("17-25", "25-35", "35-45", "45-55", "55-65", "65-70")
+row.names(distance.both) <- c("Female", "Male")
+
+barplot(distance.both, main="Average Trip Distance of Males and Females by Age Group", ylab = "Average Distance (Miles)", beside =TRUE, col = c("magenta", "blue"), legend=TRUE, xlim = c(0,22), xlab = "Age Group", ylim = c(0,1.5))
+
+#to improve memory space, removing large objects 
+rm(fem.age.group, mal.age.group, gender.list)
+```
+
+#2e
+```{r}
+#creating data frame of top ten popular bikes used by bike id
+TimesUsed <- as.data.frame(head(sort(table(data2017$bikeid), decreasing=TRUE), n=10))
+
+#selecting the names of the bike id 
+BikeID <- TimesUsed$Var1
+
+#calculating the total duration for each of the 10 most popular bikes 
+duration = c()
+for (i in 1:nrow(TimesUsed)){
+  duration[[i]] = sum(data2017[which(data2017$bikeid==BikeID[[i]]), "DurationMins"])
+}
+
+#adding a duration column to the dataframe with most popular bikes and number of times they were used
+TimesUsed$Duration <- duration
+colnames(TimesUsed) <- c("Bike ID", "Times Used", "Trip Duration (Mins)")
+
+#combining all information into a table 
+kable(TimesUsed)
+
+#making a barplot of the most popular bikes by the number of times used
+par(cex.main=1)
+barplot(height = TimesUsed$`Times Used`, names.arg = TimesUsed$`Bike ID`, main = "10 Most Popular Bikes and the Number of Times They Were Used", ylab = "Number of Times Used", col = 'yellow', xlab = "Bike ID", ylim = c(0,2000))
+
+#making a barplot of the most popular bikes by the time in use
+barplot(height = TimesUsed$`Trip Duration (Mins)`, names.arg = TimesUsed$`Bike ID`, main = "10 Most Popular Bikes and their Duration of Use (Mins)", ylab = "Duration of Use (Mins)", col = 'darkgreen', xlab = "Bike ID", ylim = c(0,30000))
+```
+
+
+#3 Data Cleaning 
+```{r}
+
+#since we could not calculate speed with a distance of 0, we eliminated all the distances that were 0 and are assuming for our model that the only possible trips taken are to and from different stations. 
+
+summary(Age)
+#since the maximum Age is greater than 120 and the minimum Age is 2, we can see that there are some outliers we will need to remove in order for our calculations and model to make sense. Thus, we will only use the ages that fall within the 95th percentile for age. 
+
+
+#based on this criteria we will use ages > 25 and ages < 60
+data2017 <- data2017[data2017$Age  < quantile(data2017$Age, 0.95, na.rm=TRUE), ]
+data2017 <- data2017[data2017$Age  > quantile(data2017$Age, 0.05, na.rm=TRUE), ]
+
+#factorized age to make it more generalizeable, rather than granular 
+data2017[which(data2017$Age>=25 & data2017$Age<35), "AgeGroup"] <- 1
+data2017[which(data2017$Age>=35 & data2017$Age<45), "AgeGroup"] <- 2
+data2017[which(data2017$Age>=45 & data2017$Age<55), "AgeGroup"] <- 3
+data2017[which(data2017$Age>=55 & data2017$Age<=60), "AgeGroup"] <- 4
+
+#converting AgeGroup to a factor variable
+data2017[, 'AgeGroup'] <- as.factor(data2017[, 'AgeGroup'])
+
+rm(Age)
+```
+
+#Additional Data 
+```{r}
+#adding relevant weather data 
+weather <- read.csv("weather_description.csv")
+temp <- read.csv("temperature.csv")
+
+#merge weather and temp based on datetime field 
+weather <- merge(weather, temp, by.x = "datetime", by.y = "datetime")
+
+#remove temperature data for processing and memory efficiency 
+rm(temp)
+
+#getting hour from datetime object in data2017 and from weather dataframe
+datahrs <- format(strptime(data2017$start_time,"%m/%d/%Y %H:%M:%S"),'%H')
+dataday <- format(as.Date(data2017$start_time, format = "%m/%d/%Y"), "%d")
+datamonth <- format(as.Date(data2017$start_time, format = "%m/%d/%Y"), "%m")
+
+#creating a date and hour field to merge the weather data to
+weatherhrs <- format(strptime(weather$datetime,"%m/%d/%Y %H:%M"),'%H')
+weatherday <-  format(as.Date(weather$datetime, format = "%m/%d/%y"), "%d")
+weathermonth <-  format(as.Date(weather$datetime, format = "%m/%d/%y"), "%m")
+
+#adding columns to merge weather and data2017
+weather$Merge <- paste(weatherhrs, weatherday, weathermonth, sep = " ")
+data2017$MergeWeather <- paste(datahrs, dataday, datamonth, sep = " ")
+
+#remove data and weather vectors created above for space and memory efficiency
+rm(datahrs, datamonth, dataday, weatherhrs, weatherday, weathermonth)
+
+#merge weather and data2017 (use a right merge to keep all the rows in the original data set that don't have weather and temperature values from the combined weather data set)
+data2017 <- merge(weather, data2017, by.x = "Merge", by.y = "MergeWeather", all.y = T)
+
+#removing weather dataframe to improve memory 
+rm(weather)
+
+#removing "Merge" column and "datetime" column 
+data2017 <- subset(data2017, select = -c(Merge, datetime))
+
+#rename weather and temperature columns 
+colnames(data2017)[1:2] <- c("Weather", "Temperature")
+
+#convert temperature to fahrenheit 
+data2017$Temperature <- ((data2017$Temperature) - 273.15)*(9/5) + 32
+
+#we will also remove fields that were used to create other fields such as start and end time with duration
+#we are doing this because those fields are redundatnt and will be highly correlated with the fields that were calculated from them 
+
+#removing "start-time", "end_time", "DurationHrs"
+data2017 <- subset(data2017, select = -c(start_time, end_time, DurationHrs))
+
+
+```
+
+#Exploratory Analysis of predictor variables, transformations, feature engingeering 
+```{r}
+summary(data2017)
+
+#Factorizing Categorical Variables 
+
+#for weather descriptions create factor variables for top 6 specific conditions and then for anything else, group them together 
+data2017$WeatherFactor <-NA 
+data2017[which(data2017$Weather == "sky is clear"), "WeatherFactor"] <- 1
+data2017[which(data2017$Weather == "mist"), "WeatherFactor"] <- 2
+data2017[which(data2017$Weather == "scattered clouds"), "WeatherFactor"] <- 3
+data2017[which(data2017$Weather == "broken clouds"), "WeatherFactor"] <- 4
+data2017[which(data2017$Weather == "overcast clouds"), "WeatherFactor"] <- 5
+data2017[which(data2017$Weather == "few clouds"), "WeatherFactor"] <- 6
+data2017[which(is.na(data2017$WeatherFactor)), "WeatherFactor"] <- 7
+
+#converting WeatherFactor to a factor variable
+data2017[, 'WeatherFactor'] <- as.factor(data2017[, 'WeatherFactor'])
+
+
+#factoring usertype and gender
+data2017$UsertypeFactor <-NA
+data2017[which(data2017$usertype=="Subscriber"), "UsertypeFactor"] <- 1
+data2017[which(data2017$usertype=="Customer"), "UsertypeFactor"] <- 2
+data2017[which(data2017$usertype=="Dependent"), "UsertypeFactor"] <- 3
+data2017$UsertypeFactor <- as.factor(data2017$UsertypeFactor)
+
+data2017$GenderFactor <- NA
+data2017[which(data2017$gender=="Male"), "GenderFactor"] <-1
+data2017[which(data2017$gender=="Female"), "GenderFactor"] <-2
+data2017$GenderFactor <- as.factor(data2017$GenderFactor)
+
+#Dealing with Multicolinearity 
+
+#removing fields which are highly correlated for other fields we created such as distance, age, and duration
+#removing fields which are correlated with their factor versions that we created above 
+
+data2017 <- data2017[, -which(names(data2017) %in% c("online_date.x","online_date.y", "X.x", "X.y", "tripduration", "Start Latitude", "Start Longitude", "End Latitude", "End Longitude", "birthyear", "gender", "usertype", "Weather"))]
+
+
+
+#naturally, Age and AgeGroup have a high correlation (greater than 95%), so we also remove AgeGroup
+data2017 <- subset(data2017, select = -c(AgeGroup))
+
+
+###############################################################################################################
+
+#determining if we should remove a small number of outliers 
+
+#both starting and ending locations are skewed right, there are more frequent starting and ending stations 
+hist(data2017$from_station_id)
+hist(data2017$to_station_id)
+
+#creating categorical variables 
+
+#to get a normally distributed duration, we take the log as a mathematical transformation 
+hist(log(data2017$DurationMins))
+hist(log(data2017$Distance)) #normally distributed with log  
+
+
+#plot Distance, speed, and age to make sure they are normally distributed 
+hist(data2017$Age) #not normally distributed, skewed right 
+
+hist(data2017$Speed) #heavily skewed right 
+hist((data2017$Temperature)) #skewed left
+
+#removing NA values 
+data2017 <- na.omit(data2017)
+
+```
+
+
+#Modeling - Feature Selection 
+
+```{r}
+
+
+#using log as a transformation for Duration and Distance 
+#removing speed so as to not keep both distance and speed to determine duration, which is not realistic to have
+lin.mod <-lm(log(data2017$DurationMins)~log(Distance)+Age+Temperature+WeatherFactor+UsertypeFactor+GenderFactor, data = data2017)
+summary(lin.mod)
+
+
+#creating interaction of weather and temperature 
+#did not include speed so as to not keep both distance and speed to determine duration, which is not realistic to have
+lin.mod.2 <-lm(log(data2017$DurationMins)~log(Distance)+Age+Temperature*WeatherFactor, data = data2017)
+summary(lin.mod.2)
+
+
+#adding an interaction of speed and Age as well as temperature and weather
+lin.mod.3 <-lm(log(data2017$DurationMins)~Age*Speed+Temperature*WeatherFactor, data = data2017)
+summary(lin.mod.3)
+
+
+
+#using step function to select features from the first linear model for the model of best fit
+# Fit the full model 
+# Stepwise regression model
+#there still seems to be overfitting since there are a significant number of predictors included 
+step.model <- stepAIC(lin.mod, direction = "both", 
+                      trace = FALSE)
+summary(step.model)
+
+#running the original model with the log transformation on new dataset without outliers
+#after testing the cross validated error, even though the adjusted r - squared value was high
+#the mean squared error was high as well, so we try to avoid over fitting by removing some of the 
+#predictor variables
+
+lin.mod.4 <- lm(log(DurationMins)~log(Distance)+Temperature, data = data2017)
+summary(lin.mod.4)
+
+#using cooksdistance to determine outliers for the fourth model, which had the highest adjusted and multiple r squared values of the three models tried.
+out=c(as.numeric(names(tail(sort(cooks.distance(lin.mod.4)), (0.048*length(data2017[,1]))))))
+#removing outliers from the entire dataset 
+data2017 <- data2017[-out,]
+
+
+lin.mod.out <- lm(log(DurationMins)~log(Distance)+Temperature, data = data2017)
+summary(lin.mod.out)
+
+#calculating MSE for linear model
+MSE <- mean(summary(lin.mod.out)$residuals^2)
+
+#creating training and testing sets 
+smp_size <- floor(0.8 * nrow(data2017))
+
+
+## splitting data into training and testing set for cross validation
+set.seed(123)
+train_ind <- sample(seq_len(nrow(data2017)), size = smp_size)
+
+train <- data2017[train_ind, ]
+test <- data2017[-train_ind, ]
+
+#5 fold cross validation to validate mdoel 
+mod_cv <- train(log(DurationMins)~log(Distance)+Temperature, data = data2017, 
+                  method = "lm",
+                  trControl=trainControl(
+                    method = "cv",
+                    number=5,
+                    savePredictions = TRUE,
+                    verboseIter = TRUE)
+)
+
+mod_cv$results
+
+#fitting model on training data and testing on test data 
+
+lmMod <- lm(log(DurationMins)~log(Distance)+Temperature, data=train) 
+distPred <- predict(lmMod, test)  # predict duration
+
+#comparing actual to predicted values 
+actuals_preds <- data.frame(cbind(actuals=test$DurationMins, predicteds=distPred))  # make actuals_predicteds dataframe.
+correlation_accuracy <- cor(actuals_preds)  
+# MAPE Calculation
+mape <- mean(abs((actuals_preds$predicteds - actuals_preds$actuals))/actuals_preds$actuals)  
+
+
+```
+
+
+
+## Including Plots of Linear Model 
+```{r pressure, echo=FALSE}
+par(mfrow = c(2, 2))
+plot(lin.mod.out)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

@@ -1,0 +1,277 @@
+---
+title: "DevUp NLP Portion"
+author: "Mrinalini Samanta"
+date: "5/20/2019"
+output: html_document
+---
+
+Three Data Sets To Use (Reviews, Check In, Business)
+1a,1b,1c
+```{r setup, include=FALSE}
+#set working directory to where the yelp data files are stored
+setwd("~/Desktop/DevUp 2019")
+
+#install rjson package and jsonlite to read in json file 
+library("rjson")
+library("jsonlite")
+library("dplyr")
+library("tidyr")
+library("tidytext")
+#word cloud packages and text mining packages
+library("tm")
+library("SnowballC")
+library("wordcloud")
+library("RColorBrewer")
+#LDA and topic modeling packages 
+library("ldatuning")
+library("foreach")
+library('topicmodels')
+library("ggplot2")
+library("knitr")
+#for sentiment analyses
+library("tidyverse")
+library("stringr")
+library("textdata")
+
+#reading in datafiles 
+business <- stream_in(file("/Users/mrinalinisamanta/Desktop/DevUp\ 2019/business.json", open="r"))
+business.IL<-business[which(business$state=="IL"),]
+
+#originally split the review file into 5 smaller files
+reviews1 <- stream_in(file("/Users/mrinalinisamanta/Desktop/DevUp\ 2019/xaa.json", open="r"))
+reviews2 <- stream_in(file("/Users/mrinalinisamanta/Desktop/DevUp\ 2019/xab.json", open="r"))
+reviews3 <- stream_in(file("/Users/mrinalinisamanta/Desktop/DevUp\ 2019/xac.json", open="r"))
+reviews4 <- stream_in(file("/Users/mrinalinisamanta/Desktop/DevUp\ 2019/xad.json", open="r"))
+reviews5 <- stream_in(file("/Users/mrinalinisamanta/Desktop/DevUp\ 2019/xae.json", open="r"))
+
+#merge all split review files
+reviews <- rbind(reviews1, reviews2, reviews3, reviews4, reviews5)
+
+
+#merge on the business id
+bus.reviews <- merge(business.IL,reviews,by="business_id", all.x = TRUE)
+
+#rename column names 
+colnames(bus.reviews)[colnames(bus.reviews)=="stars.x"] <- "business_stars"
+colnames(bus.reviews)[colnames(bus.reviews)=="stars.y"] <- "reviews_stars"
+
+#reading in the check in data
+checkin <- stream_in(file("/Users/mrinalinisamanta/Desktop/DevUp\ 2019/checkin.json", open="r"))
+
+#expanding the date field 
+checkin <- checkin %>% 
+  mutate(date = strsplit(as.character(date), ", ")) %>%
+  tidyr::unnest(date)
+
+#filtering out for only 2017 dates 
+checkin <- checkin[which(grepl("2017", checkin$date)),]
+
+
+#splitting the dates in the check in column and creating multiple rows
+
+#merge on the business id
+all.data <- merge(bus.reviews, checkin, by="business_id")
+
+
+#filtering out the data not relevant to restaurants
+restaurant.data <- all.data[-which(is.na(all.data$attributes$GoodForMeal)),]
+
+#rename column names
+colnames(restaurant.data)[colnames(all.data)=="date.x"] <- "review_date"
+colnames(restaurant.data)[colnames(all.data)=="date.y"] <- "checkin_date"
+
+
+#removing unnecessary objects to improve efficiency
+rm(business, business.IL, reviews1, reviews2, reviews3, reviews4, reviews5)
+
+```
+
+2.Data Visualization
+a - Popular Cuisines
+```{r}
+#we are assuming that each restaurant cuisine is stated in categories, if it is not listed as "american" or "indian" for example, then we are not considering those data points 
+
+#the cuisine list is based on the unique cuisines listed in the categories field
+cuisine.list = c("American", "Thai", "Italian", "Chinese", "Japanese", "Indian", "Mexican", "Korean", "Vietnamese", "Middle Eastern", "Irish", "Cajun")
+num.rest=list()
+num.check=list()
+for (i in 1:length(cuisine.list)){
+  num.rest[i]<- length(unique(restaurant.data[grep(cuisine.list[i], restaurant.data$categories),]$business_id)) 
+  num.check[i]<- dim(restaurant.data[grep(cuisine.list[i], restaurant.data$categories),])[[1]]
+}
+
+#formatting table 
+cuisine.type <- as.data.frame(cbind(cuisine.list, num.check, num.rest[-13]))
+cuisine.type <- as.data.frame(lapply(cuisine.type, unlist))
+#colnames(cuisine.type) <- c("Cuisine", "Number of Check Ins", "Number of Restaurants")
+popular.cuisine.table <- head(cuisine.type[order(cuisine.type$num.check, decreasing = T),], 10)
+colnames(popular.cuisine.table) <- c("Cuisine", "Number of Check Ins", "Number of Restaurants")
+
+#print table of top 10 cuisines based on number of check ins and number of restaurants 
+popular.cuisine.table
+
+
+barplot(popular.cuisine.table$`Number of Check Ins`,
+main = "Top 10 Cuisines in Chicago by Number of Checkins in 2017", xlab = "Cuisine", ylab = "Number of Check Ins", names.arg = popular.cuisine.table$Cuisine, col = "darkred", horiz = FALSE, ylim=c(0,350000), las=2, cex.names = .7, cex.axis = .7)
+
+```
+
+2b - Most Popular words for all cuisines
+
+word cloud and word frequency function for top 10 cuisines
+```{r}
+cuisine <- list("Japanese", "American", "Mexican", "Chinese", "Indian", "Korean", "Thai", "Italian", "Cajun", "Vietnamese")
+for (i in 1:length(cuisine)){
+  Cuisine <- restaurant.data[grep(cuisine[i], restaurant.data$categories, fixed=TRUE),]
+  Cuisine.Doc <- Corpus(VectorSource(Cuisine$text))
+  #cleaning out punctuation, numbers and making everything lowercase 
+  Cuisine.Doc <- tm_map(Cuisine.Doc, removePunctuation)
+  Cuisine.Doc <- tm_map(Cuisine.Doc, removeNumbers)
+  Cuisine.Doc <- tm_map(Cuisine.Doc, tolower)
+  
+  #removing stop words and white space 
+  Cuisine.Doc <- tm_map(Cuisine.Doc, removeWords, stopwords("english"))
+  Cuisine <- tm_map(Cuisine.Doc, stripWhitespace)
+  
+  #creating a document term matrix for analyses
+  Cuisine.dtm <- DocumentTermMatrix(Cuisine.Doc)
+  Cuisine.m <- as.matrix(Cuisine.dtm)
+  Cuisine.freq <- colSums(Cuisine.m)
+  
+  #word frequencies
+  Cuisine.wordfreq <- data.frame(word=names(Cuisine.freq), freq=Cuisine.freq)
+  
+  #storing popular words for each cuisine
+  assign(paste("pop.", cuisine[i], ".words", sep = ''), head(Cuisine.wordfreq[order(Cuisine.wordfreq$freq, decreasing = T),], 10)$word)
+  
+  #storing word cloud df for each cuisine
+  assign(paste(cuisine[i], ".wordclouddf", sep = ''), Cuisine.wordfreq)
+}
+
+#wordcloud function calls 
+wordcloud(Japanese.wordclouddf$word, Japanese.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+wordcloud(American.wordclouddf$word, American.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+wordcloud(Mexican.wordclouddf$word, Mexican.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+wordcloud(Chinese.wordclouddf$word, Chinese.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+wordcloud(Indian.wordclouddf$word, Indian.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+wordcloud(Korean.wordclouddf$word, Korean.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+wordcloud(Thai.wordclouddf$word, Thai.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+wordcloud(Italian.wordclouddf$word, Italian.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+wordcloud(Cajun.wordclouddf$word, Cajun.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+wordcloud(Vietnamese.wordclouddf$word, Vietnamese.wordclouddf$freq, min.freq = 10, max.words = 100, random.order = FALSE, rot.per = 0.35, use.r.layout = FALSE, colors = brewer.pal(8, "Dark2"))
+
+rm(Cuisine, Cuisine.Doc, Cuisine.dtm, Cuisine.m, Cuisine.freq)
+```
+
+3. Topic Modeling 
+```{r}
+#using a smaller portion of the document term matrix since it takes a very long time to run
+set.seed(12345) 
+sampling <- sample(nrow(restaurant.data)*0.6, 200, replace = FALSE)
+train_data <- restaurant.data[sampling,]
+test_data <- restaurant.data[-sampling,]
+
+##Creating the document-term matrix for train data
+doc.vec_train <- VectorSource(train_data)
+doc.corpus_train <- Corpus(doc.vec_train)
+doc.corpus_train <- tm_map(doc.corpus_train , tolower)
+doc.corpus_train <- tm_map(doc.corpus_train, removePunctuation)
+doc.corpus_train <- tm_map(doc.corpus_train, removeNumbers)
+doc.corpus_train <- tm_map(doc.corpus_train, removeWords, stopwords("english"))
+doc.corpus_train <- tm_map(doc.corpus_train, stripWhitespace)
+
+TDM_train <- TermDocumentMatrix(doc.corpus_train)
+DTM_train <- DocumentTermMatrix(doc.corpus_train)
+
+
+#Each row of the input matrix needs to contain at least one non-zero entry
+rowTot<- apply(DTM_train, 1, sum)
+cleanDTM_train <- DTM_train[rowTot>0,]
+
+##plot the metrics to get number of topics
+system.time({
+  food <- FindTopicsNumber(
+    dtm = cleanDTM_train,
+    topics = c(2:15),
+    metrics = c("Griffiths2004", "CaoJuan2009", "Arun2010"),
+    method = "Gibbs",
+    control = list(seed = 12345),
+    mc.cores = 4L,
+    verbose = TRUE
+  )
+})
+
+#plotting to determine optimal number of topics 
+FindTopicsNumber_plot(food)
+#we see the optimal number of topics is 13
+
+#LDA modeling 
+LDAmodel <- LDA(cleanDTM_train, k=13, control = list(seed = 12345))
+
+#getting the beta or per-topic-per-word probabilities
+LDATopics <- tidy(LDAmodel, matrix = "beta")
+
+#only selecting top 5 terms per topic
+LDA.top.terms <- LDATopics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta) %>%
+  mutate(order = rev(row_number()))
+
+#plotting top 13 topics and terms per topic along with their respective betas
+LDA.top.terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot2::ggplot(ggplot2::aes(term, beta, fill = factor(topic))) +
+  ggplot2::geom_col(show.legend = FALSE) +
+  ggplot2::facet_wrap( ~topic, scales = "free")+
+  ggplot2::coord_flip()
+```
+
+4. Sentiment Analysis 
+```{r}
+#in order to do the sentiment analyses I will be using all reviews in the entire cleaned restaurant dataset
+#since there are duplicate reviews, I will need to clean the duplicate reviews due to the check ins
+clean.restaurant <- distinct(restaurant.data,review_id, .keep_all= TRUE)
+
+avg.star.rating <- mean(clean.restaurant$reviews_stars)
+
+#sentiment analyses
+#removing stop words
+restaurant.words <- clean.restaurant %>%
+  select(review_id, business_id, reviews_stars, text) %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word, str_detect(word, "^[a-z']+$"))
+
+#calculating sentiments with AFINN leixcon to get sentiment scores per word used
+restaurantAFINN <- get_sentiments("afinn")
+names(restaurantAFINN)[names(restaurantAFINN) == 'value'] <- 'score'
+restaurantAFINN <- restaurantAFINN %>% mutate(lexicon = "afinn", sentiment = ifelse(score >= 0, "positive", "negative"),words_in_lexicon = n_distinct((word)))%>%
+  select(word, afinn_score = score)
+
+
+restaurantSentiment <-restaurant.words %>%
+  inner_join(restaurantAFINN, by = "word") %>%
+  group_by(review_id, reviews_stars) %>%
+  summarize(sentiment = mean(afinn_score))
+
+
+#plotting reiviews sentiment 
+ggplot(restaurantSentiment, aes(reviews_stars, sentiment, group = reviews_stars)) +
+  geom_boxplot() +
+  ylab("Average sentiment score")+
+  xlab("Review Stars")
+
+#calculating the correlation between reviews stars and sentiment score
+cor(restaurantSentiment$reviews_stars, restaurantSentiment$sentiment) #0.5417906
+```
+
